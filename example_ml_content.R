@@ -7,7 +7,7 @@ library(opencode)
 library(cli)
 
 # Configuration
-BASE_URL <- "http://localhost:51769"
+BASE_URL <- "http://localhost:4096"
 MODEL_ID <- "glm-4.7"
 PROVIDER_ID <- "zai-coding-plan"
 OUTPUT_FILE <- "machine_learning_intro.md"
@@ -21,7 +21,7 @@ cat("========================================\n\n")
 cli::cli_h1("Creating Opencode Client")
 client <- Opencode$new(
   base_url = BASE_URL,
-  timeout = 180,
+  timeout = 1000,
   max_retries = 3
 )
 cli::cli_alert_success("Client created!\n")
@@ -56,7 +56,7 @@ Keep it simple and beginner-friendly."
 cli::cli_alert_success("Response received!\n")
 
 # Extract the content
-ml_content <- response$content
+ml_content <- response$parts[[3]]$text
 cli::cli_h2("Generated Content Preview")
 cli::cli_text("{substring(ml_content, 1, 200)}...\n")
 
