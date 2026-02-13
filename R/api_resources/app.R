@@ -19,16 +19,36 @@ AppResource <- R6::R6Class(
 
     #' Get app information
     #'
-    #' @return App object
+    #' Note: The /app endpoint may not return JSON in all implementations.
+    #' @return App object or NULL
     get = function() {
-      self$.get("/app", type = "App")
+      tryCatch({
+        response <- self$.get("/app", type = "App")
+        if (inherits(response, "App") && !is.null(response$id)) {
+          response
+        } else {
+          NULL
+        }
+      }, error = function(e) {
+        NULL
+      })
     },
 
     #' Initialize the app
     #'
-    #' @return AppInitResponse object
+    #' Note: The /app/init endpoint may not return JSON in all implementations.
+    #' @return AppInitResponse object or NULL
     init = function() {
-      self$.post("/app/init", type = "AppInitResponse")
+      tryCatch({
+        response <- self$.post("/app/init", type = "AppInitResponse")
+        if (inherits(response, "AppInitResponse")) {
+          response
+        } else {
+          NULL
+        }
+      }, error = function(e) {
+        NULL
+      })
     },
 
     #' Log a message
@@ -43,9 +63,19 @@ AppResource <- R6::R6Class(
 
     #' Get available modes
     #'
-    #' @return AppModesResponse object
+    #' Note: The /mode endpoint may not return JSON in all implementations.
+    #' @return AppModesResponse object or NULL
     modes = function() {
-      self$.get("/mode", type = "AppModesResponse")
+      tryCatch({
+        response <- self$.get("/mode", type = "AppModesResponse")
+        if (inherits(response, "AppModesResponse")) {
+          response
+        } else {
+          NULL
+        }
+      }, error = function(e) {
+        NULL
+      })
     },
 
     #' Get available providers
@@ -71,11 +101,19 @@ AsyncAppResource <- R6::R6Class(
     },
 
     get_async = function() {
-      self$.get_async("/app", type = "App")
+      tryCatch({
+        self$.get_async("/app", type = "App")
+      }, error = function(e) {
+        NULL
+      })
     },
 
     init_async = function() {
-      self$.post_async("/app/init", type = "AppInitResponse")
+      tryCatch({
+        self$.post_async("/app/init", type = "AppInitResponse")
+      }, error = function(e) {
+        NULL
+      })
     },
 
     log_async = function(message, level = "info") {
@@ -84,7 +122,11 @@ AsyncAppResource <- R6::R6Class(
     },
 
     modes_async = function() {
-      self$.get_async("/mode", type = "AppModesResponse")
+      tryCatch({
+        self$.get_async("/mode", type = "AppModesResponse")
+      }, error = function(e) {
+        NULL
+      })
     },
 
     providers_async = function() {

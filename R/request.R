@@ -41,8 +41,12 @@ build_request <- function(config, method, path, body = NULL, query = NULL, heade
 
   # Add query parameters
   if (length(query) > 0 || length(config$default_query) > 0) {
-    all_query <- c(config$default_query, query)
-    req <- req %>% httr2::req_url_query(!!!all_query)
+    # Filter out NULL values from query
+    query_filtered <- query[!sapply(query, is.null)]
+    all_query <- c(config$default_query[!sapply(config$default_query, is.null)], query_filtered)
+    if (length(all_query) > 0) {
+      req <- req %>% httr2::req_url_query(!!!all_query)
+    }
   }
 
   # Add body for POST/PUT/PATCH
