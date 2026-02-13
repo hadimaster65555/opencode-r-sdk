@@ -1,11 +1,3 @@
----
-output: rmarkdown::html_vignette
-vignette: >
-  %\VignetteIndexEntry{OpenCode R SDK}
-  %\VignetteEngine{rmarkdown::render}
-  %\VignetteEncoding{UTF-8}
----
-
 # OpenCode R SDK
 
 The OpenCode R SDK provides a comprehensive interface to the OpenCode REST API from any R application. This package mirrors the functionality of the Python SDK while following R best practices.
