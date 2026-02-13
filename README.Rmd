@@ -1,0 +1,222 @@
+---
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{OpenCode R SDK}
+  %\VignetteEngine{rmarkdown::render}
+  %\VignetteEncoding{UTF-8}
+---
+
+# OpenCode R SDK
+
+The OpenCode R SDK provides a comprehensive interface to the OpenCode REST API from any R application. This package mirrors the functionality of the Python SDK while following R best practices.
+
+## Installation
+
+### Development Version
+
+```r
+# Install from GitHub
+devtools::install_github("anomalyco/opencode-sdk-r")
+```
+
+### From Source
+
+```r
+# Clone and install
+devtools::install("path/to/opencode-sdk-r")
+```
+
+## Quick Start
+
+```r
+library(opencode)
+
+# Create a client
+client <- Opencode$new()
+
+# List sessions
+sessions <- client$session$list()
+print(sessions)
+
+# Create a new session
+session <- client$session$create()
+print(session$id)
+
+# Send a message to the session
+response <- client$session$chat(
+  id = session$id,
+  model_id = "gpt-4",
+  provider_id = "openai",
+  parts = list(
+    list(type = "text", text = "Hello, help me write an R function")
+  )
+)
+```
+
+## Configuration
+
+### Environment Variables
+
+The SDK can be configured using environment variables:
+
+- `OPENCODE_BASE_URL`: Base URL for the API (default: http://localhost:54321)
+- `OPENCODE_API_KEY`: API authentication key
+- `OPENCODE_TIMEOUT`: Request timeout in seconds (default: 60)
+- `OPENCODE_MAX_RETRIES`: Number of retry attempts (default: 2)
+- `OPENCODE_LOG`: Logging level ("debug", "info", "warning", "error")
+
+### Programmatic Configuration
+
+```r
+client <- Opencode$new(
+  base_url = "http://localhost:54321",
+  timeout = 30,
+  max_retries = 3,
+  api_key = "your-api-key"
+)
+
+# Create a copy with different options
+client2 <- client$with_options(timeout = 60)
+```
+
+## Async Support
+
+The SDK supports asynchronous operations using the `future` package:
+
+```r
+library(opencode)
+
+# Create async client
+client <- AsyncOpencode$new()
+
+# Run operations asynchronously
+future_sessions <- client$session$list_async()
+
+# Process results when ready
+promises::then(future_sessions, function(sessions) {
+  print(sessions)
+})
+```
+
+## Error Handling
+
+The SDK provides a comprehensive error hierarchy:
+
+```r
+tryCatch({
+  sessions <- client$session$list()
+}, error = function(e) {
+  if (inherits(e, "APIConnectionError")) {
+    message("The server could not be reached")
+  } else if (inherits(e, "RateLimitError")) {
+    message("Rate limited; backing off")
+  } else if (inherits(e, "APIStatusError")) {
+    message(sprintf("Status %d: %s", e$status_code, e$message))
+  }
+})
+```
+
+## API Resources
+
+### Session
+
+```r
+# List all sessions
+sessions <- client$session$list()
+
+# Create a new session
+session <- client$session$create()
+
+# Send a message
+response <- client$session$chat(
+  id = session$id,
+  model_id = "gpt-4",
+  provider_id = "openai",
+  parts = list(list(type = "text", text = "Hello"))
+)
+
+# Delete a session
+client$session$delete(session$id)
+```
+
+### App
+
+```r
+# Get app information
+app <- client$app$get()
+
+# Get available modes
+modes <- client$app$modes()
+
+# Get available providers
+providers <- client$app$providers()
+```
+
+### Find
+
+```r
+# Find files
+files <- client$find$files("*.R")
+
+# Find symbols
+symbols <- client$find$symbols("function_name")
+
+# Find text
+results <- client$find$text("TODO")
+```
+
+### File
+
+```r
+# Read a file
+file_content <- client$file$read("/path/to/file.R")
+
+# Get file status
+status <- client$file$status()
+```
+
+### Event
+
+```r
+# List events
+events <- client$event$list()
+```
+
+### Config
+
+```r
+# Get configuration
+config <- client$config$get()
+```
+
+### TUI
+
+```r
+# Append a prompt
+client$tui$append_prompt("Help me write a function")
+
+# Open help
+client$tui$open_help()
+```
+
+## Streaming
+
+The SDK supports streaming responses for real-time updates:
+
+```r
+# Stream events
+stream <- client$event$list()
+while (TRUE) {
+  event <- stream$next_event()
+  if (is.null(event)) break
+  print(event)
+}
+```
+
+## Contributing
+
+Contributions are welcome! Please see our contributing guidelines for more details.
+
+## License
+
+This package is licensed under the MIT License.
