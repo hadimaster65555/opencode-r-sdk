@@ -8,7 +8,7 @@ The OpenCode R SDK provides a comprehensive interface to the OpenCode REST API f
 
 ```r
 # Install from GitHub
-devtools::install_github("anomalyco/opencode-sdk-r")
+devtools::install_github("hadimaster65555/opencode-sdk-r")
 ```
 
 ### From Source
@@ -37,8 +37,8 @@ print(session$id)
 # Send a message to the session
 response <- client$session$chat(
   id = session$id,
-  model_id = "gpt-4",
-  provider_id = "openai",
+  model_id = "kimi-2.5",
+  provider_id = "moonshot-ai",
   parts = list(
     list(type = "text", text = "Hello, help me write an R function")
   )
