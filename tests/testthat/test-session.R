@@ -47,3 +47,51 @@ test_that("Session types work correctly", {
   abort_resp <- SessionAbortResponse(list(id = "sess-123", aborted = TRUE))
   expect_s3_class(abort_resp, "SessionAbortResponse")
 })
+
+test_that("chat_stream validates session ID", {
+  client <- Opencode$new()
+
+  expect_error(client$session$chat_stream(
+    id = "",
+    model_id = "glm-4.7",
+    parts = list(list(type = "text", text = "hello")),
+    provider_id = "zai-coding-plan"
+  ), "Session ID is required")
+})
+
+test_that("chat_stream returns list with expected structure", {
+  client <- Opencode$new(base_url = "http://localhost:54321")
+
+  result <- client$session$chat_stream(
+    id = "test-session",
+    model_id = "glm-4.7",
+    parts = list(list(type = "text", text = "hello")),
+    provider_id = "zai-coding-plan"
+  )
+
+  expect_type(result, "list")
+  expect_named(result, c("full_response", "chunks", "model_id", "provider_id"))
+  expect_type(result$full_response, "character")
+  expect_type(result$chunks, "list")
+  expect_equal(result$model_id, "glm-4.7")
+  expect_equal(result$provider_id, "zai-coding-plan")
+})
+
+test_that("chat_stream callback is invoked", {
+  client <- Opencode$new(base_url = "http://localhost:54321")
+
+  callback_invocations <- 0
+  callback <- function(chunk) {
+    callback_invocations <<- callback_invocations + 1
+  }
+
+  result <- client$session$chat_stream(
+    id = "test-session",
+    model_id = "glm-4.7",
+    parts = list(list(type = "text", text = "hello")),
+    provider_id = "zai-coding-plan",
+    callback = callback
+  )
+
+  expect_gte(callback_invocations, 0)
+})

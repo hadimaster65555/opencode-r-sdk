@@ -21,9 +21,9 @@ stream_events <- function(client, path, query = NULL, method = "GET") {
   SSEStream$new(config, path, query = query, method = method)
 }
 
-#' SSE Stream Iterator
+#' SSE Stream using curl multi-handle
 #'
-#' Handles SSE stream parsing and iteration.
+#' True streaming implementation using curl's multi interface.
 #' @keywords internal
 SSEStream <- R6::R6Class(
   "SSEStream",
@@ -32,7 +32,10 @@ SSEStream <- R6::R6Class(
     path = NULL,
     query = NULL,
     method = NULL,
-    con = NULL,
+    url = NULL,
+    multi_handle = NULL,
+    easy_handle = NULL,
+    buffer = NULL,
     initialized = FALSE,
 
     initialize = function(config, path, query = NULL, method = "GET") {
@@ -40,43 +43,76 @@ SSEStream <- R6::R6Class(
       self$path <- path
       self$query <- query
       self$method <- method
+      self$url <- paste0(config$base_url, path)
+      self$buffer <- raw(0)
 
-      # Set up the connection
-      url <- paste0(config$base_url, path)
-      req <- httr2::request(url) %>%
-        httr2::req_method(method) %>%
-        httr2::req_timeout(config$get_timeout())
+      tryCatch({
+        self$multi_handle <- curl::new_multi_handle()
+        self$easy_handle <- curl::new_handle(URL = self$url, FOLLOWLOCATION = TRUE)
 
-      # Open connection for streaming
-      self$con <- req %>%
-        httr2::req_perform_sequential() %>%
-        httr2::resp_body_raw()
+        if (method == "POST") {
+          curl::handle_setopt(self$easy_handle, POST = TRUE)
+        }
 
-      self$initialized <- TRUE
+        headers <- c(
+          "Accept: text/event-stream",
+          "Cache-Control: no-cache"
+        )
+        curl::handle_setopt(self$easy_handle, HTTPHEADER = headers)
+
+        curl::multi_add(self$multi_handle, self$easy_handle)
+
+        self$initialized <- TRUE
+      }, error = function(e) {
+        rlang::warn(paste("Failed to initialize stream:", e$message))
+        self$initialized <- FALSE
+      })
     },
 
-    # Get next event from stream
-    next_event = function() {
-      if (!self$initialized || is.null(self$con)) {
+    next_event = function(timeout = 0.1) {
+      if (!self$initialized) {
         return(NULL)
       }
 
-      line <- readLines(self$con, n = 1, warn = FALSE)
+      tryCatch({
+        done <- FALSE
+        while (!done && curl::multi_run(self$multi_handle, timeout = timeout) > 0) {
+          data <- curl::multi_read(self$easy_handle, timeout = timeout)
 
-      if (length(line) == 0) {
-        return(NULL)
-      }
+          if (length(data) > 0) {
+            self$buffer <- c(self$buffer, data)
 
-      self$parse_sse_line(line)
+            lines <- strsplit(rawToChar(self$buffer), "\n")[[1]]
+
+            for (i in seq_len(length(lines) - 1)) {
+              line <- lines[i]
+              if (nzchar(line)) {
+                event <- self$parse_sse_line(line)
+                if (!is.null(event)) {
+                  self$buffer <- raw(0)
+                  return(event)
+                }
+              }
+            }
+
+            self$buffer <- charToRaw(lines[length(lines)])
+          }
+
+          done <- TRUE
+        }
+        NULL
+      }, error = function(e) {
+        NULL
+      })
     },
 
-    # Parse a single SSE line
     parse_sse_line = function(line) {
       if (nchar(line) == 0 || line == "") {
         return(NULL)
       }
 
-      # Parse SSE format: "event: type" or "data: {...}"
+      line <- sub("\r$", "", line)
+
       if (startsWith(line, "event:")) {
         event_type <- sub("^event: ", "", line)
         return(list(type = event_type, data = NULL))
@@ -85,7 +121,10 @@ SSEStream <- R6::R6Class(
       if (startsWith(line, "data:")) {
         data_str <- sub("^data: ", "", line)
 
-        # Try to parse as JSON
+        if (data_str == "") {
+          return(list(type = "heartbeat", data = NULL))
+        }
+
         tryCatch({
           data <- jsonlite::fromJSON(data_str, simplifyVector = FALSE)
           return(list(type = "message", data = data))
@@ -94,7 +133,6 @@ SSEStream <- R6::R6Class(
         })
       }
 
-      # Other SSE fields (id, retry)
       if (startsWith(line, "id:")) {
         return(list(type = "id", id = sub("^id: ", "", line)))
       }
@@ -106,13 +144,17 @@ SSEStream <- R6::R6Class(
       NULL
     },
 
-    # Close the stream
     close = function() {
-      if (!is.null(self$con)) {
-        close(self$con)
-        self$con <- NULL
-        self$initialized <- FALSE
+      if (!is.null(self$multi_handle)) {
+        tryCatch({
+          curl::multi_remove(self$multi_handle, self$easy_handle)
+        }, error = function(e) {})
+        self$multi_handle <- NULL
       }
+      if (!is.null(self$easy_handle)) {
+        self$easy_handle <- NULL
+      }
+      self$initialized <- FALSE
     },
 
     print = function(...) {
@@ -120,6 +162,121 @@ SSEStream <- R6::R6Class(
     }
   )
 )
+
+#' Stream text response with callbacks
+#'
+#' Simplified streaming that yields text chunks as they arrive.
+#' @param url Full URL to stream from
+#' @param method HTTP method
+#' @param body Request body (for POST)
+#' @param headers Additional headers
+#' @param timeout Request timeout
+#' @param callback Function to call with each chunk
+#' @param on_error Error handler function
+#' @return List with full_response and chunks
+#' @keywords internal
+stream_text <- function(url, method = "GET", body = NULL, headers = NULL,
+                        timeout = 60, callback = NULL, on_error = NULL) {
+
+  full_response <- character(0)
+  chunks <- list()
+
+  tryCatch({
+    handle <- curl::new_handle(URL = url, FOLLOWLOCATION = TRUE)
+
+    if (method == "POST") {
+      curl::handle_setopt(handle, POST = TRUE)
+      if (!is.null(body)) {
+        curl::handle_setopt(handle, POSTFIELDS = body)
+      }
+    }
+
+    all_headers <- c(
+      "Accept: text/event-stream",
+      "Cache-Control: no-cache",
+      headers %||% character(0)
+    )
+    curl::handle_setopt(handle, HTTPHEADER = all_headers)
+
+    con <- curl::curl(url, open = "rb")
+
+    on_timeout <- function(con, timeout_sec) {
+      start_time <- Sys.time()
+      while (TRUE) {
+        ready <- curl::is_readable(con)
+        if (ready) {
+          return(TRUE)
+        }
+        if (as.numeric(Sys.time() - start_time) > timeout_sec) {
+          return(FALSE)
+        }
+        Sys.sleep(0.01)
+      }
+    }
+
+    chunk_buffer <- ""
+
+    while (TRUE) {
+      if (!on_timeout(con, 0.1)) {
+        break
+      }
+
+      chunk <- readLines(con, n = 1, warn = FALSE)
+
+      if (length(chunk) == 0) {
+        break
+      }
+
+      chunk <- sub("\r$", "", chunk)
+
+      if (nzchar(chunk) && startsWith(chunk, "data:")) {
+        data_str <- sub("^data: ", "", chunk)
+
+        if (data_str == "[DONE]") {
+          break
+        }
+
+        tryCatch({
+          json_data <- jsonlite::fromJSON(data_str, simplifyVector = FALSE)
+
+          chunk_text <- NULL
+          if (is.list(json_data) && !is.null(json_data$choices)) {
+            delta <- json_data$choices[[1]]$delta
+            if (is.list(delta) && !is.null(delta$content)) {
+              chunk_text <- delta$content
+            } else if (is.list(delta) && !is.null(delta$text)) {
+              chunk_text <- delta$text
+            }
+          } else if (is.character(json_data)) {
+            chunk_text <- json_data
+          }
+
+          if (!is.null(chunk_text) && nzchar(chunk_text)) {
+            full_response <- c(full_response, chunk_text)
+            chunks[[length(chunks) + 1]] <- chunk_text
+
+            if (!is.null(callback)) {
+              callback(chunk_text)
+            }
+          }
+        }, error = function(e) {
+        })
+      }
+    }
+
+    close(con)
+
+  }, error = function(e) {
+    if (!is.null(on_error)) {
+      on_error(e)
+    }
+  })
+
+  list(
+    full_response = paste(full_response, collapse = ""),
+    chunks = chunks
+  )
+}
 
 #' Create a streaming response wrapper
 #' @param client Client instance

@@ -193,6 +193,64 @@ SessionResource <- R6::R6Class(
         rlang::abort("Session ID is required")
       }
       self$.delete(paste0("/session/", id, "/share"), type = "Session")
+    },
+
+    #' Stream chat response (real-time)
+    #'
+    #' Sends a message and yields streamed response chunks as they arrive.
+    #' This provides real-time feedback similar to CLI experiences.
+    #'
+    #' @param id Session ID
+    #' @param model_id Model ID to use
+    #' @param parts Message parts (list of text/tool parts)
+    #' @param provider_id Provider ID
+    #' @param message_id Message ID (optional)
+    #' @param mode Mode (optional)
+    #' @param system System prompt (optional)
+    #' @param tools Tools configuration (optional)
+    #' @param callback Optional callback function(chunk) for each chunk received
+    #' @return Invisible list with full_response and chunks
+    chat_stream = function(id, model_id, parts, provider_id, message_id = NULL,
+                           mode = NULL, system = NULL, tools = NULL,
+                           callback = NULL) {
+      if (missing(id) || !nzchar(id)) {
+        rlang::abort("Session ID is required")
+      }
+
+      config <- self$get_config()
+      url <- paste0(config$base_url, "/session/", id, "/message")
+
+      body <- list(
+        model_id = model_id,
+        parts = parts,
+        provider_id = provider_id
+      )
+
+      if (!is.null(message_id)) body$message_id <- message_id
+      if (!is.null(mode)) body$mode <- mode
+      if (!is.null(system)) body$system <- system
+      if (!is.null(tools)) body$tools <- tools
+
+      body_json <- jsonlite::toJSON(body, auto_unbox = TRUE)
+
+      cli::cli_inform("Streaming response from {model_id}...")
+
+      result <- stream_text(
+        url = url,
+        method = "POST",
+        body = body_json,
+        headers = "Content-Type: application/json",
+        timeout = config$timeout,
+        callback = callback,
+        on_error = function(e) {
+          cli::cli_warn("Streaming error: {e$message}")
+        }
+      )
+
+      result$model_id <- model_id
+      result$provider_id <- provider_id
+
+      invisible(result)
     }
   )
 )
@@ -316,6 +374,27 @@ AsyncSessionResource <- R6::R6Class(
         rlang::abort("Session ID is required")
       }
       self$.delete_async(paste0("/session/", id, "/share"), type = "Session")
+    },
+
+    chat_stream_async = function(id, model_id, parts, provider_id, message_id = NULL,
+                                  mode = NULL, system = NULL, tools = NULL,
+                                  callback = NULL) {
+      config <- self$get_config()
+
+      future::future({
+        result <- self$client$session$chat_stream(
+          id = id,
+          model_id = model_id,
+          parts = parts,
+          provider_id = provider_id,
+          message_id = message_id,
+          mode = mode,
+          system = system,
+          tools = tools,
+          callback = callback
+        )
+        result
+      }, seed = TRUE)
     }
   )
 )
